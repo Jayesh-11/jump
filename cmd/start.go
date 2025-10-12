@@ -396,7 +396,7 @@ func CreateContainer(dockerImageName string, filePath string) {
 
 	fmt.Println("Getting logs")
 
-	out, err := cli.ContainerLogs(context.Background(), containerId, container.LogsOptions{ShowStdout: true})
+	out, err := cli.ContainerLogs(context.Background(), containerId, container.LogsOptions{ShowStdout: true, ShowStderr: true})
 	if err != nil {
 		panic(err)
 	}
