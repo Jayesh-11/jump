@@ -1,1 +1,1 @@
-A CLI tool that lets you start doing DSA problems practice offline. You know like in you own IDE and offline and free.
+A CLI tool that lets you practice DSA problems offline, fast and in your own IDE. Free forever.
