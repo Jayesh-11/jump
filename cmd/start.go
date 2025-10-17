@@ -105,19 +105,23 @@ type pullEvent struct {
     } `json:"progressDetail"`
 }
 
-func handleDockerfileExecution( filename string, image string) string {
+func handleDockerfileExecution( filename string, image string, showLogs bool) string {
+	echoFileExistSuccess := ""
+	if showLogs {
+		echoFileExistSuccess = "echo '✓ File exists'"
+	}
 
 	if image == "node:alpine" {
 		return fmt.Sprintf(`
 			if [ -f /app/%s ]; then
-				echo "✓ File exists"
+				%s
 				node /app/%s
 			else
 				echo "✗ File not found!"
 				ls -la /app
 				exit 1
 			fi
-		`, filename, filename)
+		`, filename, echoFileExistSuccess, filename)
 	}
 
 	if image == "gcc:trixie" {
@@ -178,7 +182,7 @@ func handleDockerfileExecution( filename string, image string) string {
 		rustTrimmedFilename := strings.TrimSuffix(filename, ".rs")	
 		return fmt.Sprintf(`
 			if [ -f /app/%s ]; then
-				echo "✓ File exists"
+				%s
 				rustc /app/%s
 				/app/%s
 			else
@@ -186,14 +190,14 @@ func handleDockerfileExecution( filename string, image string) string {
 				ls -la /app
 				exit 1
 			fi
-		`, filename, filename, rustTrimmedFilename)
+		`, filename, echoFileExistSuccess, filename, rustTrimmedFilename)
 	}
 
 	return ""
 	
 }
 
-func PullImage(dockerImageName string) bool {
+func PullImage(dockerImageName string, showLogs bool) bool {
 	// https://riptutorial.com/docker/example/31980/image-pulling-with-progress-bars--written-in-go
 	// https://docs.docker.com/reference/api/engine/sdk/examples/#run-a-container -> // TODO: try this one too, seems simpler
     client, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
@@ -208,10 +212,11 @@ func PullImage(dockerImageName string) bool {
 	if err != nil {
 		panic(err)
 	}
-	for _, image := range imageList {
-		fmt.Println(image.RepoTags)
+	if showLogs{
+		for _, image := range imageList {
+			fmt.Println(image.RepoTags)
+		}
 	}
-	
 	imageExists := false
 	for _, image := range imageList {
 		if image.RepoTags[0] == dockerImageName {
@@ -219,7 +224,9 @@ func PullImage(dockerImageName string) bool {
 		}
 	}
 	if imageExists {
-		fmt.Println("Image already exists")
+		if showLogs {
+			fmt.Println("Image already exists")
+		}
 		return true
 	}
 
@@ -308,7 +315,8 @@ func PullImage(dockerImageName string) bool {
     return false
 }
 
-func CreateContainer(dockerImageName string, filePath string) {
+
+func CreateContainer(dockerImageName string, filePath string, showLogs bool) {
 	
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
@@ -320,19 +328,29 @@ func CreateContainer(dockerImageName string, filePath string) {
 	if err != nil {
 		panic(err)
 	}
-	for _, ctr := range containers {
-		fmt.Printf("%s %s (status: %s)\n", ctr.ID, ctr.Image, ctr.Status)
+
+	if showLogs{
+		for _, ctr := range containers {
+			fmt.Printf("%s %s (status: %s)\n", ctr.ID, ctr.Image, ctr.Status)
+		}
 	}
+
 	containerExists := false
 	containerId := ""
 	for _, ctr := range containers {
 		if ctr.Image == dockerImageName {
 			containerId = ctr.ID
 			containerExists = true
+			break
 		}
 	}
 	if containerExists {
-		fmt.Println("Container already exists, removing...")
+
+		if showLogs{
+			fmt.Println("Container already exists, removing...")
+		}
+		// don't need to remove until bash script changes, since user might get updated bash script we need to give potion to clear container or use exec
+		// also if we don't remove container user can see old logs for some reason, need to fix that as well
 		cli.ContainerRemove(context.Background(), containerId, container.RemoveOptions{Force: true})
 		containerExists = false
 	}	
@@ -340,19 +358,24 @@ func CreateContainer(dockerImageName string, filePath string) {
 	filename := strings.Split(filePath, "/")[len(strings.Split(filePath, "/"))-1]
 
 	if !containerExists {
-		fmt.Println("Container does not exist, creating...", filename)
+		if showLogs{
+			fmt.Println("Container does not exist, creating...", filename)
+		}
 
 		createdContainer, err := cli.ContainerCreate(context.Background(), &container.Config{
 			Image: dockerImageName,
-			Cmd:   []string{"/bin/sh", "-c", handleDockerfileExecution(filename, dockerImageName)},
+			Cmd:   []string{"/bin/sh", "-c", handleDockerfileExecution(filename, dockerImageName, showLogs)},
 			Tty:   false,
 			WorkingDir: "/app",
+
 		}, nil, nil, nil, "")
 		if err != nil {
 			panic(err)
 		}
 
-		fmt.Println("Container created", filename)
+		if showLogs{
+			fmt.Println("Container created", filename)
+		}
 		containerId = createdContainer.ID
 	}
 
@@ -367,23 +390,27 @@ func CreateContainer(dockerImageName string, filePath string) {
     tw.Write(fileContent)
     tw.Close()
 
-	fmt.Println("Copying file to container")
+	if showLogs{
+		fmt.Println("Copying file to container")
+	}
 
 	if err := cli.CopyToContainer(context.Background(), containerId, "/app/", &buf, container.CopyToContainerOptions{}); 
 	err != nil {
 		panic(err)
 	}
 
-	
-
-	fmt.Println("Starting container")
+	if showLogs{
+		fmt.Println("Starting container")
+	}
 
 	if err := cli.ContainerStart(context.Background(), containerId, container.StartOptions{}); 
 	err != nil {
 		panic(err)
 	}
 
-	fmt.Println("Waiting for container to finish")
+	if showLogs{
+		fmt.Println("Waiting for container to finish")
+	}
 
 	statusCh, errCh := cli.ContainerWait(context.Background(), containerId, container.WaitConditionNotRunning)
 	select {
@@ -394,16 +421,35 @@ func CreateContainer(dockerImageName string, filePath string) {
 	case <-statusCh:
 	}
 
-	fmt.Println("Getting logs")
+	if showLogs{
+		fmt.Println("Getting logs")
+	}
 
-	out, err := cli.ContainerLogs(context.Background(), containerId, container.LogsOptions{ShowStdout: true, ShowStderr: true})
+	out, err := cli.ContainerLogs(context.Background(), containerId, container.LogsOptions{
+		ShowStdout: true, 
+		ShowStderr: true, 
+		Timestamps: showLogs, 
+		Details: true, 
+	})
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Println("Streaming logs")
+	if showLogs{
+		fmt.Println("Streaming logs")
+	}
 	
 	stdcopy.StdCopy(os.Stdout, os.Stderr, out)
+
+	err = cli.ContainerStop(context.Background(), containerId, container.StopOptions{})
+	if err != nil {
+		panic(err)
+	}
+
+	if showLogs{
+		fmt.Println("Container stopped")
+	}
+
 }
 
 
@@ -420,17 +466,19 @@ var startCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		fileName := strings.Split(args[0], "/")[len(strings.Split(args[0], "/"))-1]
 		fileExtension := strings.Split(fileName, ".")[len(strings.Split(fileName, "."))-1]
+		showLogs, _ := cmd.Flags().GetBool("log")
 
 		// TODO: handle language not found
 		// TODO: validate input file path and file extension
 		// TODO: add language specific Cmd on CreateContainer
 
-		PullImage(LanguageConfigs[fileExtension].DockerImage)
-		CreateContainer(LanguageConfigs[fileExtension].DockerImage, args[0])
+		PullImage(LanguageConfigs[fileExtension].DockerImage, showLogs)
+		CreateContainer(LanguageConfigs[fileExtension].DockerImage, args[0], showLogs)
 
 	},
 }
 
 func init() {
+	startCmd.Flags().Bool("log", false, "Show logs")
 	rootCmd.AddCommand(startCmd)
 }
