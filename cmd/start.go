@@ -10,7 +10,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path"
+	"path/filepath"
 	"strings"
 
 	"github.com/docker/docker/api/types/container"
@@ -317,7 +320,27 @@ func PullImage(dockerImageName string, showLogs bool) bool {
 
 
 func CreateContainer(dockerImageName string, filePath string, showLogs bool) {
-	
+	filename := filepath.Base(filePath)
+	dirPath := path.Dir(filePath)
+	testCasesFilePath := ""
+	testCasesFileName := ""
+
+	filepath.WalkDir(dirPath,func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rawFileName := strings.Split(filename, ".")[0]
+		testCasesFileName = fmt.Sprintf(`%s.test_cases.json`, rawFileName)
+		if testCasesFileName == d.Name() {
+			testCasesFilePath = path
+			if showLogs {
+				fmt.Println(path,"\n", d.Name())
+			}
+			return nil
+		}
+		return nil
+	})
+
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		panic(err)
@@ -355,8 +378,6 @@ func CreateContainer(dockerImageName string, filePath string, showLogs bool) {
 		containerExists = false
 	}	
 
-	filename := strings.Split(filePath, "/")[len(strings.Split(filePath, "/"))-1]
-
 	if !containerExists {
 		if showLogs{
 			fmt.Println("Container does not exist, creating...", filename)
@@ -390,11 +411,27 @@ func CreateContainer(dockerImageName string, filePath string, showLogs bool) {
     tw.Write(fileContent)
     tw.Close()
 
+	var testFileBuf bytes.Buffer
+	tw = tar.NewWriter(&testFileBuf)
+	testFileContent, _ := os.ReadFile(testCasesFilePath)
+	tw.WriteHeader(&tar.Header{
+		Name: testCasesFileName,
+		Mode: 0644,
+		Size: int64(len(testFileContent)),
+	})
+	tw.Write(testFileContent)
+	tw.Close()
+
 	if showLogs{
 		fmt.Println("Copying file to container")
 	}
-
+	
 	if err := cli.CopyToContainer(context.Background(), containerId, "/app/", &buf, container.CopyToContainerOptions{}); 
+	err != nil {
+		panic(err)
+	}
+
+	if err := cli.CopyToContainer(context.Background(), containerId, "/app/", &testFileBuf, container.CopyToContainerOptions{}); 
 	err != nil {
 		panic(err)
 	}
