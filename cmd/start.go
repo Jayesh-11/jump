@@ -30,11 +30,6 @@ type LanguageConfig struct {
 	Extension string
 }
 
-type BaseOperationFiles struct {
-	FilePath string
-	FileName string
-}
-
 var LanguageConfigs = map[string]LanguageConfig{
 	"cpp": {
 		Language: "cpp",
@@ -191,14 +186,13 @@ func handleDockerfileExecution( filename string, image string, showLogs bool) st
 		return fmt.Sprintf(`
 			if [ -f /app/%s ]; then
 				%s
-				rustc /app/%s
-				/app/%s
+				cargo run --bin %s
 			else
 				echo "✗ File not found!"
 				ls -la /app
 				exit 1
 			fi
-		`, filename, echoFileExistSuccess, filename, rustTrimmedFilename)
+		`, filename, echoFileExistSuccess, rustTrimmedFilename)
 	}
 
 	return ""
@@ -445,29 +439,45 @@ func CreateContainer(dockerImageName string, filePath string, showLogs bool) {
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
 
-	baseFiles := []BaseOperationFiles{
-		{
-			FilePath: filePath,
-			FileName: filename,
-		},
-		{
-			FilePath: testCasesFilePath,
-			FileName: testCasesFileName,
-		},
-		{
-			FilePath: testRunnerFilePath,
-			FileName: testRunnerFileName,
-		},
+	baseFiles := []string{
+		filePath,
+		testCasesFilePath,
+		testRunnerFilePath,
+		
 	}
 
 	for _, file := range baseFiles {
-		fileContent, _ := os.ReadFile(file.FilePath)
+		fileContent, _ := os.ReadFile(file)
 		tw.WriteHeader(&tar.Header{
-			Name: file.FileName,
+			Name: filepath.Base(file),
 			Mode: 0644,
 			Size: int64(len(fileContent)),
 		})
 		tw.Write(fileContent)	
+	}
+
+	if extension == "rs" {
+		filepath.WalkDir(fmt.Sprintf("%s/rust_setup", rootDirPath), func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				return nil
+			}
+			rustfilePath, found := strings.CutPrefix(path, fmt.Sprintf("%s/rust_setup", rootDirPath))
+			if !found {
+				return fmt.Errorf("failed to cut prefix: %s", path)
+			}
+			fileContent, _ := os.ReadFile(path)
+			tw.WriteHeader(&tar.Header{
+				Name: rustfilePath,
+				Mode: 0644,
+				Size: int64(len(fileContent)),
+			})
+			tw.Write(fileContent)
+			return nil
+		})
+
 	}
 	tw.Close()
 
