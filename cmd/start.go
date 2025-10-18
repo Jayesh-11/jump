@@ -146,7 +146,7 @@ func handleDockerfileExecution( filename string, image string, showLogs bool) st
 		return fmt.Sprintf(`
 			if [ -f /app/%s ]; then
 				echo "✓ File exists"
-				go run /app/%s
+				go run /app/%s /app/test_runner.go
 			else
 				echo "✗ File not found!"
 				ls -la /app
@@ -570,5 +570,6 @@ var startCmd = &cobra.Command{
 
 func init() {
 	startCmd.Flags().Bool("log", false, "Show logs")
+	// TODO: watch mode flag?
 	rootCmd.AddCommand(startCmd)
 }
