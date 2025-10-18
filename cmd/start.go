@@ -30,6 +30,11 @@ type LanguageConfig struct {
 	Extension string
 }
 
+type BaseOperationFiles struct {
+	FilePath string
+	FileName string
+}
+
 var LanguageConfigs = map[string]LanguageConfig{
 	"cpp": {
 		Language: "cpp",
@@ -63,7 +68,7 @@ var LanguageConfigs = map[string]LanguageConfig{
 	},
 	"rs": {
 		Language: "rust",
-		DockerImage: "rust:alpine",
+		DockerImage: "rust:trixie",
 		// ExecutionCommand: handleDockerfileExecution,
 		Extension: "rs",
 	},
@@ -181,7 +186,7 @@ func handleDockerfileExecution( filename string, image string, showLogs bool) st
 		`, filename, filename)
 	}
 
-	if image == "rust:alpine" {
+	if image == "rust:trixie" {
 		rustTrimmedFilename := strings.TrimSuffix(filename, ".rs")	
 		return fmt.Sprintf(`
 			if [ -f /app/%s ]; then
@@ -439,35 +444,31 @@ func CreateContainer(dockerImageName string, filePath string, showLogs bool) {
 
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
-	fileContent, _ := os.ReadFile(filePath)
-	tw.WriteHeader(&tar.Header{
-        Name: filename,
-        Mode: 0644,
-        Size: int64(len(fileContent)),
-    })
-    tw.Write(fileContent)
-    tw.Close()
 
-	var testFileBuf bytes.Buffer
-	tw = tar.NewWriter(&testFileBuf)
-	testFileContent, _ := os.ReadFile(testCasesFilePath)
-	tw.WriteHeader(&tar.Header{
-		Name: testCasesFileName,
-		Mode: 0644,
-		Size: int64(len(testFileContent)),
-	})
-	tw.Write(testFileContent)
-	tw.Close()
+	baseFiles := []BaseOperationFiles{
+		{
+			FilePath: filePath,
+			FileName: filename,
+		},
+		{
+			FilePath: testCasesFilePath,
+			FileName: testCasesFileName,
+		},
+		{
+			FilePath: testRunnerFilePath,
+			FileName: testRunnerFileName,
+		},
+	}
 
-	var testRunnerFileBuf bytes.Buffer
-	tw = tar.NewWriter(&testRunnerFileBuf)
-	testRunnerFileContent, _ := os.ReadFile(testRunnerFilePath)
-	tw.WriteHeader(&tar.Header{
-		Name: testRunnerFileName,
-		Mode: 0644,
-		Size: int64(len(testRunnerFileContent)),
-	})
-	tw.Write(testRunnerFileContent)
+	for _, file := range baseFiles {
+		fileContent, _ := os.ReadFile(file.FilePath)
+		tw.WriteHeader(&tar.Header{
+			Name: file.FileName,
+			Mode: 0644,
+			Size: int64(len(fileContent)),
+		})
+		tw.Write(fileContent)	
+	}
 	tw.Close()
 
 	if showLogs{
@@ -475,16 +476,6 @@ func CreateContainer(dockerImageName string, filePath string, showLogs bool) {
 	}
 	
 	if err := cli.CopyToContainer(context.Background(), containerId, "/app/", &buf, container.CopyToContainerOptions{}); 
-	err != nil {
-		panic(err)
-	}
-
-	if err := cli.CopyToContainer(context.Background(), containerId, "/app/", &testFileBuf, container.CopyToContainerOptions{}); 
-	err != nil {
-		panic(err)
-	}
-
-	if err := cli.CopyToContainer(context.Background(), containerId, "/app/", &testRunnerFileBuf, container.CopyToContainerOptions{}); 
 	err != nil {
 		panic(err)
 	}
