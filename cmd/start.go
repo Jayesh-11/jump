@@ -228,7 +228,7 @@ func PullImage(dockerImageName string, showLogs bool) bool {
 	}
 	if imageExists {
 		if showLogs {
-			fmt.Println("Image already exists")
+			fmt.Println("Image already exists", "\n")
 		}
 		return true
 	}
@@ -322,24 +322,60 @@ func PullImage(dockerImageName string, showLogs bool) bool {
 func CreateContainer(dockerImageName string, filePath string, showLogs bool) {
 	filename := filepath.Base(filePath)
 	dirPath := path.Dir(filePath)
+	rootDirPath := path.Dir(dirPath)
 	testCasesFilePath := ""
 	testCasesFileName := ""
+	testRunnerFilePath := ""
+	splitFilename := strings.Split(filename, ".")
+	rawFileName := splitFilename[0]
+	extension := splitFilename[1]
+	testRunnerFileName := fmt.Sprintf(`test_runner.%s`, extension)
+	testCasesFileName = fmt.Sprintf(`%s.test_cases.json`, rawFileName)
+
+	filesTraversedCount := 0
+	if showLogs {
+		fmt.Println("traversing directory:", dirPath)
+	}
 
 	filepath.WalkDir(dirPath,func(path string, d fs.DirEntry, err error) error {
+		filesTraversedCount++
 		if err != nil {
 			return err
 		}
-		rawFileName := strings.Split(filename, ".")[0]
-		testCasesFileName = fmt.Sprintf(`%s.test_cases.json`, rawFileName)
+
 		if testCasesFileName == d.Name() {
 			testCasesFilePath = path
 			if showLogs {
-				fmt.Println(path,"\n", d.Name())
+				fmt.Println("test cases file found:", path)
 			}
 			return nil
 		}
 		return nil
 	})
+
+	if showLogs {
+		fmt.Println("files traversed:", filesTraversedCount, "\n")
+		fmt.Println("traversing directory:", rootDirPath)
+	}	
+
+	filepath.WalkDir(fmt.Sprintf("%s/test_shared", rootDirPath ),func(path string, d fs.DirEntry, err error) error {
+		filesTraversedCount++
+		if err != nil {
+			return err
+		}
+		if testRunnerFileName == d.Name() {
+			testRunnerFilePath = path
+			if showLogs {
+				fmt.Println("test runner file found:", path)
+			}
+			return nil
+		}
+		return nil
+	})
+
+	if showLogs {
+		fmt.Println("files traversed:", filesTraversedCount, "\n")
+	}
 
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
@@ -356,6 +392,7 @@ func CreateContainer(dockerImageName string, filePath string, showLogs bool) {
 		for _, ctr := range containers {
 			fmt.Printf("%s %s (status: %s)\n", ctr.ID, ctr.Image, ctr.Status)
 		}
+		fmt.Println("\n")
 	}
 
 	containerExists := false
@@ -395,7 +432,7 @@ func CreateContainer(dockerImageName string, filePath string, showLogs bool) {
 		}
 
 		if showLogs{
-			fmt.Println("Container created", filename)
+			fmt.Println("Container created", "\n")
 		}
 		containerId = createdContainer.ID
 	}
@@ -422,8 +459,19 @@ func CreateContainer(dockerImageName string, filePath string, showLogs bool) {
 	tw.Write(testFileContent)
 	tw.Close()
 
+	var testRunnerFileBuf bytes.Buffer
+	tw = tar.NewWriter(&testRunnerFileBuf)
+	testRunnerFileContent, _ := os.ReadFile(testRunnerFilePath)
+	tw.WriteHeader(&tar.Header{
+		Name: testRunnerFileName,
+		Mode: 0644,
+		Size: int64(len(testRunnerFileContent)),
+	})
+	tw.Write(testRunnerFileContent)
+	tw.Close()
+
 	if showLogs{
-		fmt.Println("Copying file to container")
+		fmt.Println("Copying following files to container:\n", filename, "\n", testCasesFileName, "\n", testRunnerFileName, "\n")
 	}
 	
 	if err := cli.CopyToContainer(context.Background(), containerId, "/app/", &buf, container.CopyToContainerOptions{}); 
@@ -432,6 +480,11 @@ func CreateContainer(dockerImageName string, filePath string, showLogs bool) {
 	}
 
 	if err := cli.CopyToContainer(context.Background(), containerId, "/app/", &testFileBuf, container.CopyToContainerOptions{}); 
+	err != nil {
+		panic(err)
+	}
+
+	if err := cli.CopyToContainer(context.Background(), containerId, "/app/", &testRunnerFileBuf, container.CopyToContainerOptions{}); 
 	err != nil {
 		panic(err)
 	}
