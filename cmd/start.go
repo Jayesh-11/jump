@@ -357,7 +357,7 @@ func CreateContainer(dockerImageName string, filePath string, showLogs bool) {
 		fmt.Println("traversing directory:", rootDirPath)
 	}	
 
-	filepath.WalkDir(fmt.Sprintf("%s/test_shared", rootDirPath ),func(path string, d fs.DirEntry, err error) error {
+	filepath.WalkDir(fmt.Sprintf("%s/test_runner", rootDirPath ),func(path string, d fs.DirEntry, err error) error {
 		filesTraversedCount++
 		if err != nil {
 			return err
